@@ -18,6 +18,8 @@ const types: {
   j_oTag: new TokContext("<tag"), // JSX opening tag
   j_cTag: new TokContext("</tag"), // JSX closing tag
   j_expr: new TokContext("<tag>...</tag>", true), // JSX expressions
+  j_attrTag: new TokContext("<.tag"), // JSX Attribute tag
+  j_attrExpr: new TokContext("<.tag>...", true), // JSX Attribute expressions
 };
 
 if (!process.env.BABEL_8_BREAKING) {

@@ -438,6 +438,106 @@ export default (superClass: typeof Parser) =>
       return this.finishNode(node, "JSXOpeningElement");
     }
 
+    // Parses JSX attribute tag starting after "<.".
+
+    jsxParseAttributeElementAt(startLoc: Position): N.JSXAttribute {
+      const node = this.startNodeAt<N.JSXAttribute>(startLoc);
+      if (this.eat(tt.jsxTagEnd)) {
+        this.unexpected();
+      }
+
+      node.name = this.jsxParseIdentifier();
+      this.eat(tt.jsxTagEnd);
+
+      const children = [];
+      contents: for (;;) {
+        switch (this.state.type) {
+          case tt.jsxAttributeTagStart:
+            break contents;
+
+          case tt.jsxTagStart:
+            if (this.lookahead().type === tt.slash) {
+              // It close jsx tag
+              break contents;
+            }
+
+            startLoc = this.state.startLoc;
+            this.next();
+            children.push(this.jsxParseElementAt(startLoc));
+            break;
+
+          case tt.jsxText:
+            children.push(this.parseLiteral(this.state.value, "JSXText"));
+            break;
+
+          case tt.braceL: {
+            const node = this.startNode<
+              N.JSXSpreadChild | N.JSXExpressionContainer
+            >();
+            this.setContext(tc.brace);
+            this.next();
+            if (this.match(tt.ellipsis)) {
+              children.push(this.jsxParseSpreadChild(node));
+            } else {
+              children.push(this.jsxParseExpressionContainer(node, tc.j_expr));
+            }
+            break;
+          }
+          default:
+            this.unexpected();
+        }
+      }
+
+      if (children.length > 1) {
+        // attribute doesn't accept array
+        let isPureText = true;
+        const filterChildren = [];
+        for (const child of children) {
+          if (child.type === "JSXText") {
+            if (child.value?.trim()) {
+              filterChildren.push(child);
+            }
+          } else {
+            filterChildren.push(child);
+          }
+        }
+        for (const child of filterChildren) {
+          if (child.type !== "JSXText") {
+            isPureText = false;
+          }
+        }
+        if (!isPureText && filterChildren.length > 1) {
+          this.unexpected();
+        }
+        if (isPureText) {
+          node.value = filterChildren[0];
+          for (let i = 1; i < filterChildren.length; ++i) {
+            const child = filterChildren[i];
+            node.value += " " + child.value.trim();
+            node.extra.raw += " " + child.extra.raw;
+            node.extra.rawValue += " " + child.extra.rawValue;
+          }
+          node.end = filterChildren[filterChildren.length - 1].end;
+          node.type = "StringLiteral";
+        } else {
+          node.value = filterChildren[0];
+        }
+      } else {
+        const child = children[0];
+        if (child.type === "JSXText") {
+          child.type = "StringLiteral";
+          child.value = (child.value as string)
+            .split("\n")
+            .map(s => s.trim())
+            .filter(s => s.length)
+            .join(" ");
+        }
+        node.value = child;
+      }
+
+      return this.finishNode(node, "JSXAttribute");
+    }
+
     // Parses JSX closing tag starting after "</".
 
     jsxParseClosingElementAt(
@@ -466,6 +566,21 @@ export default (superClass: typeof Parser) =>
       if (!openingElement.selfClosing) {
         contents: for (;;) {
           switch (this.state.type) {
+            case tt.jsxAttributeTagStart: {
+              startLoc = this.state.startLoc;
+              this.next();
+              // JSX Attribute
+              const attribute = this.jsxParseAttributeElementAt(startLoc);
+              if (
+                !openingElement.attributes ||
+                !Array.isArray(openingElement.attributes)
+              ) {
+                openingElement.attributes = [];
+              }
+              openingElement.attributes.push(attribute);
+              break;
+            }
+
             case tt.jsxTagStart:
               startLoc = this.state.startLoc;
               this.next();
@@ -585,9 +700,34 @@ export default (superClass: typeof Parser) =>
     getTokenFromCode(code: number): void {
       const context = this.curContext();
 
-      if (context === tc.j_expr) {
+      if (context === tc.j_expr && context === tc.j_attrExpr) {
+        if (
+          code === charCodes.lessThan &&
+          this.input.charCodeAt(this.state.pos + 1) === charCodes.dot
+        ) {
+          ++this.state.pos;
+          ++this.state.pos;
+          this.finishToken(tt.jsxAttributeTagStart);
+          return;
+        }
+
         this.jsxReadToken();
         return;
+      }
+
+      if (context === tc.j_attrTag) {
+        if (isIdentifierStart(code)) {
+          this.jsxReadWord();
+          return;
+        }
+
+        if (code === charCodes.greaterThan) {
+          ++this.state.pos;
+          this.finishToken(tt.jsxTagEnd);
+          return;
+        }
+
+        this.unexpected();
       }
 
       if (context === tc.j_oTag || context === tc.j_cTag) {
@@ -634,12 +774,22 @@ export default (superClass: typeof Parser) =>
       } else if (type === tt.jsxTagStart) {
         // start opening tag context
         context.push(tc.j_oTag);
+      } else if (type === tt.jsxAttributeTagStart) {
+        const out = context[context.length - 1];
+        if (out === tc.j_expr || out === tc.j_attrExpr) {
+          this.setContext(tc.j_attrTag);
+          this.state.canStartJSXElement = false;
+        } else this.unexpected();
       } else if (type === tt.jsxTagEnd) {
         const out = context[context.length - 1];
         if ((out === tc.j_oTag && prevType === tt.slash) || out === tc.j_cTag) {
           context.pop();
           this.state.canStartJSXElement =
-            context[context.length - 1] === tc.j_expr;
+            context[context.length - 1] === tc.j_expr ||
+            context[context.length - 1] === tc.j_attrExpr;
+        } else if (out === tc.j_attrTag) {
+          this.setContext(tc.j_attrExpr);
+          this.state.canStartJSXElement = true;
         } else {
           this.setContext(tc.j_expr);
           this.state.canStartJSXElement = true;

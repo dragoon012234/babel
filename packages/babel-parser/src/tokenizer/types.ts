@@ -344,6 +344,7 @@ export const tt = {
   jsxText: createToken("jsxText", { beforeExpr: true }),
   jsxTagStart: createToken("jsxTagStart", { startsExpr: true }),
   jsxTagEnd: createToken("jsxTagEnd"),
+  jsxAttributeTagStart: createToken("jsxAttributeTagStart"),
 
   // placeholder plugin
   placeholder: createToken("%%", { startsExpr: true }),
