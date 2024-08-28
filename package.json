@@ -5,6 +5,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
+    "main": "BABEL_ENV=test node_modules/.bin/jest -u packages/babel-parser/test/attribute-jsx.js",
     "postinstall": "node scripts/postinstall.js",
     "bootstrap": "make bootstrap",
     "codesandbox:build": "make build-no-bundle",
